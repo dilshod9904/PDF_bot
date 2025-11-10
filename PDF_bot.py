@@ -1,154 +1,93 @@
 import os
+from flask import Flask
+import threading
 import telebot
-from telebot import types
+from fpdf import FPDF
 from docx import Document
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.utils import ImageReader
 
-TOKEN = "7873155083:AAETF8a_BBiglQ8Kkj5-AgWQh4g7nYiZQUE"  # <-- bu yerga tokeningizni yozing
+# --- Telegram token ---
+TOKEN = os.getenv("BOT_TOKEN")  # Render Environment Variables dan oling
 bot = telebot.TeleBot(TOKEN)
 
-# PDF saqlanadigan vaqtinchalik papka
-if not os.path.exists("temp"):
-    os.mkdir("temp")
+# --- Flask server ---
+app = Flask(__name__)
 
-# --- FUNKSIYA: matndan PDF yaratish ---
-def text_to_pdf(text, output_path):
-    c = canvas.Canvas(output_path, pagesize=A4)
-    text_obj = c.beginText(40, 800)
-    for line in text.split("\n"):
-        text_obj.textLine(line)
-    c.drawText(text_obj)
-    c.save()
+@app.route('/')
+def index():
+    return "PDF_Milliy_bot ishlamoqda ✅"
 
-# --- FUNKSIYA: DOCX dan PDF yaratish ---
-def docx_to_pdf(docx_path, pdf_path):
-    doc = Document(docx_path)
-    text = "\n".join([para.text for para in doc.paragraphs])
-    text_to_pdf(text, pdf_path)
+# --- PDF yaratish funksiyalari ---
+def create_pdf_from_text(text, output_path):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    pdf.multi_cell(0, 10, text)
+    pdf.output(output_path)
 
-# --- FUNKSIYA: rasmni PDF ga o‘tkazish ---
-def image_to_pdf(image_path, pdf_path):
-    c = canvas.Canvas(pdf_path, pagesize=A4)
-    image = ImageReader(image_path)
-    c.drawImage(image, 0, 0, width=A4[0], height=A4[1], preserveAspectRatio=True)
-    c.save()
+def read_word(file_path):
+    doc = Document(file_path)
+    return "\n".join([p.text for p in doc.paragraphs])
 
-# --- START komandasi ---
+# --- Telegram bot handlers ---
 @bot.message_handler(commands=['start'])
-def send_welcome(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    btn1 = types.KeyboardButton("📝 Matnni PDF qilish")
-    btn2 = types.KeyboardButton("🖼️ Rasmni PDF qilish")
-    btn3 = types.KeyboardButton("📄 Word yoki TXT faylni PDF qilish")
-    markup.add(btn1, btn2, btn3)
-    bot.send_message(
-        message.chat.id,
-        "Assalomu alaykum! 👋\nQaysi turdagi ma’lumotni PDF formatga o‘tkazmoqchisiz?",
-        reply_markup=markup
-    )
+def start_message(message):
+    bot.reply_to(message, "👋 Salom! Menga matn, Word (.docx) yoki rasm yuboring — men PDF ga aylantirib qaytaraman 📄")
 
-# --- Tugma tanlanganda javob ---
-@bot.message_handler(func=lambda message: message.text in [
-    "📝 Matnni PDF qilish",
-    "🖼️ Rasmni PDF qilish",
-    "📄 Word yoki TXT faylni PDF qilish"
-])
-def ask_for_input(message):
-    if message.text == "📝 Matnni PDF qilish":
-        bot.send_message(message.chat.id, "✏️ Matningizni yuboring.")
-    elif message.text == "🖼️ Rasmni PDF qilish":
-        bot.send_message(message.chat.id, "📷 Rasm yuboring (1 dona).")
-    elif message.text == "📄 Word yoki TXT faylni PDF qilish":
-        bot.send_message(message.chat.id, "📎 Word (.docx) yoki TXT fayl yuboring.")
+@bot.message_handler(content_types=['text'])
+def text_to_pdf(message):
+    output_path = "text_result.pdf"
+    create_pdf_from_text(message.text, output_path)
+    with open(output_path, 'rb') as f:
+        bot.send_document(message.chat.id, f, caption="✅ Matningiz PDF ga o‘tkazildi!")
+    os.remove(output_path)
 
-# --- Rasm qabul qilish ---
+@bot.message_handler(content_types=['document'])
+def handle_docs(message):
+    file_info = bot.get_file(message.document.file_id)
+    downloaded_file = bot.download_file(file_info.file_path)
+    file_name = message.document.file_name
+    local_path = f"./{file_name}"
+    with open(local_path, "wb") as f:
+        f.write(downloaded_file)
+
+    if file_name.endswith(".docx"):
+        text = read_word(local_path)
+        output_pdf = file_name.replace(".docx", ".pdf")
+        create_pdf_from_text(text, output_pdf)
+        with open(output_pdf, 'rb') as f:
+            bot.send_document(message.chat.id, f, caption=f"✅ {file_name} PDF ga o‘tkazildi!")
+        os.remove(output_pdf)
+    else:
+        bot.reply_to(message, "❌ Faqat .docx fayllarni qabul qilaman 📄")
+    os.remove(local_path)
+
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     file_info = bot.get_file(message.photo[-1].file_id)
-    downloaded = bot.download_file(file_info.file_path)
+    downloaded_file = bot.download_file(file_info.file_path)
+    img_path = f"{message.chat.id}.jpg"
+    pdf_path = f"{message.chat.id}.pdf"
+    with open(img_path, "wb") as f:
+        f.write(downloaded_file)
 
-    img_path = f"temp/{message.chat.id}.jpg"
-    pdf_path = f"temp/{message.chat.id}.pdf"
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.image(img_path, x=10, y=10, w=190)
+    pdf.output(pdf_path)
 
-    with open(img_path, 'wb') as f:
-        f.write(downloaded)
-
-    image_to_pdf(img_path, pdf_path)
-    with open(pdf_path, 'rb') as f:
-        bot.send_document(message.chat.id, f, caption="📄 Rasm PDF formatda tayyor!")
+    with open(pdf_path, "rb") as f:
+        bot.send_document(message.chat.id, f, caption="🖼 Rasm PDF ga aylantirildi!")
 
     os.remove(img_path)
     os.remove(pdf_path)
 
-# --- Word yoki TXT fayl qabul qilish ---
-@bot.message_handler(content_types=['document'])
-def handle_doc(message):
-    file_info = bot.get_file(message.document.file_id)
-    file_name = message.document.file_name
-    file_ext = file_name.lower().split('.')[-1]
+# --- Bot pollingni alohida thread-da ishga tushirish ---
+def start_bot():
+    bot.infinity_polling(timeout=60, long_polling_timeout=30)
 
-    downloaded = bot.download_file(file_info.file_path)
+threading.Thread(target=start_bot).start()
 
-    doc_path = f"temp/{file_name}"
-    pdf_name = file_name.rsplit('.', 1)[0] + ".pdf"
-    pdf_path = f"temp/{pdf_name}"
-
-    with open(doc_path, 'wb') as f:
-        f.write(downloaded)
-
-    if file_ext == "docx":
-        docx_to_pdf(doc_path, pdf_path)
-    elif file_ext == "txt":
-        with open(doc_path, 'r', encoding='utf-8') as f:
-            text = f.read()
-        text_to_pdf(text, pdf_path)
-    else:
-        bot.reply_to(message, "❌ Faqat .docx yoki .txt fayllarni qabul qilaman.")
-        os.remove(doc_path)
-        return
-
-    with open(pdf_path, 'rb') as f:
-        bot.send_document(message.chat.id, f, caption=f"✅ {pdf_name} PDF formatda tayyor!")
-
-    os.remove(doc_path)
-    os.remove(pdf_path)
-
-# --- Matnni PDF qilish ---
-@bot.message_handler(content_types=['text'])
-def handle_text(message):
-    # "/start" komandasini qayta PDF qilmaslik
-    if message.text.startswith("/start"):
-        return
-
-    text = message.text.strip()
-    if not text:
-        bot.reply_to(message, "❗ Iltimos, matn kiriting.")
-        return
-
-    pdf_name = "matn.pdf"
-    pdf_path = f"temp/{pdf_name}"
-    text_to_pdf(text, pdf_path)
-
-    with open(pdf_path, 'rb') as f:
-        bot.send_document(message.chat.id, f, caption="✅ Matningiz PDF formatda tayyor!")
-
-    os.remove(pdf_path)
-
-# --- Botni ishga tushirish ---
-print("🤖 Bot ishga tushdi...")
-bot.infinity_polling()
-
-
-import time
-
-print("🤖 Bot ishga tushmoqda...")
-
-while True:
-    try:
-        bot.infinity_polling(timeout=60, long_polling_timeout = 30)
-    except Exception as e:
-        print(f"⚠️ Xatolik: {e}")
-        print("🔄 5 soniyadan so‘ng qayta urinilmoqda...")
-        time.sleep(5)
+# --- Flask server porti (Render uchun) ---
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)

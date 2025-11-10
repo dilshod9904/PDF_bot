@@ -139,3 +139,16 @@ def handle_text(message):
 # --- Botni ishga tushirish ---
 print("🤖 Bot ishga tushdi...")
 bot.infinity_polling()
+
+
+import time
+
+print("🤖 Bot ishga tushmoqda...")
+
+while True:
+    try:
+        bot.infinity_polling(timeout=60, long_polling_timeout = 30)
+    except Exception as e:
+        print(f"⚠️ Xatolik: {e}")
+        print("🔄 5 soniyadan so‘ng qayta urinilmoqda...")
+        time.sleep(5)

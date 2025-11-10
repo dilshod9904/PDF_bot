@@ -2,5 +2,6 @@ services:
   - type: worker
     name: telegram-pdf-bot
     env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python PDF_bot.py
 
-    startCommand: PDF_bot.py
